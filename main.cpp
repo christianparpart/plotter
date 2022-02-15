@@ -277,7 +277,7 @@ int sixelWriter(char* data, int size, void* priv)
 template <typename F>
 void complex_plot(ImageSize imageSize, double xRange, double yRange, string_view s, F f)
 {
-    cout << '\t';
+    cout << s << "\n\t";
     auto canvas = RGBCanvas(imageSize);
     paint_complex(canvas, xRange, yRange, f);
 
@@ -289,7 +289,7 @@ void complex_plot(ImageSize imageSize, double xRange, double yRange, string_view
 
     sixel_dither_unref(dither);
     sixel_output_destroy(output);
-    cout << s << "\n\n";
+    cout << '\n';
 }
 
 complex<double> C(double n)
@@ -297,19 +297,29 @@ complex<double> C(double n)
     return complex<double>(n, 0.0);
 }
 
+void plot(auto s, auto cf)
+{
+    auto constexpr canvasSize = ImageSize { 400, 400 };
+    auto constexpr xRange = 2.0; // Ranges from minus N to plus N, inclusive.
+    auto constexpr yRange = 2.0;
+    complex_plot(canvasSize, xRange, yRange, s, cf);
+};
+
+// Some helper
+// clang-format off
+template <typename T, typename R> constexpr complex<T> operator+(complex<T> c, R n) { return c + complex<T>(n); }
+template <typename T, typename R> constexpr complex<T> operator-(complex<T> c, R n) { return c - complex<T>(n); }
+// clang-format on
+
+#define P(E) plot("f(z) := " #E, colorize([](auto z) { return (E); }))
+
 int main(int argc, char const* argv[])
 {
-    auto const plot = [&](auto s, auto cf) {
-        auto constexpr canvasSize = ImageSize { 400, 400 };
-        auto constexpr xRange = 3.0; // Ranges from minus N to plus N, inclusive.
-        auto constexpr yRange = 3.0;
-        complex_plot(canvasSize, xRange, yRange, s, cf);
-    };
-
-    // plot("f(z) := z", colorize_simple([](auto z) { return z; }));
-    // plot("f(z) := z", colorize([](auto z) { return z; }));
-    plot("f(z) := z*z", colorize([](auto z) { return z * z; }));
-    plot("f(z) := (z-1)/(z*z+z+1)", colorize([](auto z) { return (z - C(1)) / (z * z + z + C(1)); }));
+    // P((z - 1) / (z * z + z + 1));
+    // P(z);
+    // P(z * z);
+    P(log(z));
+    P(log(z) / log(-z));
 
     return EXIT_SUCCESS;
 }

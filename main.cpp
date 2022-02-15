@@ -48,7 +48,7 @@ struct HSVColor
 // {{{ hsv2rgb
 constexpr RGBColor hsv2rgb(HSVColor hsv) noexcept
 {
-    assert(0.0 <= hsv.hue && hsv.hue <= 1.0);
+    assert(0.0 <= hsv.hue && hsv.hue <= 360.0);
     assert(0.0 <= hsv.saturation && hsv.saturation <= 1.0);
     assert(0.0 <= hsv.value && hsv.value <= 1.0);
 
@@ -194,13 +194,15 @@ void paint_complex(Canvas& canvas, double xRange, double yRange, F f)
     };
 
     auto const angle = [](auto x, auto y) {
-        return (M_PI + atan2(-y, -x)) / (2 * M_PI);
+        auto const angleRadians = (M_PI + atan2(-y, -x)) / (2 * M_PI);
+        return angleRadians * (180.0 / M_PI);
     };
 
     auto const color = [&](auto x, auto y) {
         auto const hsv = HSVColor { angle(real_f(z(x, y)), imaginary_f(z(x, y))),
                                     magnitude_shading(x, y),
                                     gridlines(x, y) };
+        //printf("hsv(%f, %f, %f)\n", hsv.hue, hsv.saturation, hsv.value);
         return hsv2rgb(hsv);
     };
 
@@ -243,8 +245,8 @@ void complex_plot(ImageSize imageSize, double xRange, double yRange, F f)
 int main(int argc, char const* argv[])
 {
     auto const canvasSize = ImageSize { 400, 400 };
-    auto const xRange = 4.0; // Ranges from minus N to plus N, inclusive.
-    auto const yRange = 4.0;
+    auto const xRange = 8; // Ranges from minus N to plus N, inclusive.
+    auto const yRange = 8;
 
     cout << "\t";
     complex_plot(canvasSize, xRange, yRange, [](auto z) { return z; });

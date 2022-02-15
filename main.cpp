@@ -7,8 +7,41 @@
 
 #include <sixel/sixel.h>
 
-using namespace std;
+using std::abs;
+using std::cout;
+using std::isinf;
+using std::isnan;
+using std::move;
+using std::vector;
+
 using namespace std::complex_literals;
+
+template <typename T, const T Min, const T Max>
+struct domain_value
+{
+    T value;
+
+    constexpr static T clamped(T v) noexcept { return std::clamp(v, Min, Max); }
+
+    // clang-format off
+    constexpr domain_value& operator=(T v) { value = clamped(v); return *this; }
+    // clang-format on
+
+    constexpr domain_value(T v): value { clamped(v) } {}
+    constexpr operator T() const noexcept { return value; }
+    constexpr T operator()() const noexcept { return value; }
+    constexpr domain_value operator+(domain_value other) const noexcept { return { value + other.value }; }
+    constexpr domain_value operator-(domain_value other) const noexcept { return { value - other.value }; }
+    constexpr domain_value operator*(domain_value other) const noexcept { return { value * other.value }; }
+    constexpr domain_value operator/(domain_value other) const noexcept { return { value / other.value }; }
+    constexpr domain_value operator%(domain_value other) const noexcept { return { value % other.value }; }
+};
+
+template <typename T>
+using norm = domain_value<T, 0.0, 1.0>;
+
+template <typename T>
+using degree = domain_value<T, 0.0, 360.0>;
 
 struct ImageSize
 {
@@ -38,70 +71,66 @@ struct RGBColor
 
 struct HSVColor
 {
-    double hue;
-    double saturation;
-    double value;
-
-    constexpr double& operator[](int i) noexcept { return *(&hue + i); }
+    degree<double> hue;
+    norm<double> saturation;
+    norm<double> value;
 };
 
-// {{{ hsv2rgb
 constexpr RGBColor hsv2rgb(HSVColor hsv) noexcept
 {
-    assert(0.0 <= hsv.hue && hsv.hue <= 360.0);
-    assert(0.0 <= hsv.saturation && hsv.saturation <= 1.0);
-    assert(0.0 <= hsv.value && hsv.value <= 1.0);
+    // Implementation from:
+    // https://www.codegrepper.com/code-examples/cpp/c%2B%2B+hsl+to+rgb+integer
 
     double r = 0, g = 0, b = 0;
 
-    if (hsv.saturation == 0)
+    if (hsv.saturation() == 0)
     {
-        r = hsv.value;
-        g = hsv.value;
-        b = hsv.value;
+        r = hsv.value();
+        g = hsv.value();
+        b = hsv.value();
     }
     else
     {
-        if (hsv.hue == 360)
+        if (hsv.hue() == 360)
             hsv.hue = 0;
         else
-            hsv.hue = hsv.hue / 60;
+            hsv.hue = hsv.hue() / 60;
 
-        auto const i = static_cast<int>(trunc(hsv.hue));
-        double const f = hsv.hue - i;
-        double const p = hsv.value * (1.0 - hsv.saturation);
-        double const q = hsv.value * (1.0 - (hsv.saturation * f));
-        double const t = hsv.value * (1.0 - (hsv.saturation * (1.0 - f)));
+        auto const i = static_cast<int>(trunc(hsv.hue()));
+        auto const f = hsv.hue() - i;
+        auto const p = hsv.value() * (1.0 - hsv.saturation());
+        auto const q = hsv.value() * (1.0 - (hsv.saturation() * f));
+        auto const t = hsv.value() * (1.0 - (hsv.saturation() * (1.0 - f)));
 
         switch (i)
         {
         case 0:
-            r = hsv.value;
+            r = hsv.value();
             g = t;
             b = p;
             break;
         case 1:
             r = q;
-            g = hsv.value;
+            g = hsv.value();
             b = p;
             break;
         case 2:
             r = p;
-            g = hsv.value;
+            g = hsv.value();
             b = t;
             break;
         case 3:
             r = p;
             g = q;
-            b = hsv.value;
+            b = hsv.value();
             break;
         case 4:
             r = t;
             g = p;
-            b = hsv.value;
+            b = hsv.value();
             break;
         default:
-            r = hsv.value;
+            r = hsv.value();
             g = p;
             b = q;
             break;
@@ -116,15 +145,13 @@ constexpr RGBColor hsv2rgb(HSVColor hsv) noexcept
                       static_cast<unsigned char>(g * 255.0),
                       static_cast<unsigned char>(b * 255.0) };
 }
-// }}}
 
-// RGB canvas
-struct Canvas
+struct RGBCanvas
 {
     ImageSize size;
     vector<uint8_t> pixels;
 
-    explicit Canvas(ImageSize _size): size { _size }
+    explicit RGBCanvas(ImageSize _size): size { _size }
     {
         pixels.resize(size.area() * 3);
         fill(begin(pixels), end(pixels), 0xFF); // fill color: white
@@ -143,7 +170,7 @@ struct Canvas
 };
 
 template <typename F>
-void paint_complex(Canvas& canvas, double xRange, double yRange, F f)
+void paint_complex(RGBCanvas& canvas, double xRange, double yRange, F f)
 {
     auto const threshold = 0.1;
 
@@ -202,19 +229,22 @@ void paint_complex(Canvas& canvas, double xRange, double yRange, F f)
         auto const hsv = HSVColor { angle(real_f(z(x, y)), imaginary_f(z(x, y))),
                                     magnitude_shading(x, y),
                                     gridlines(x, y) };
-        //printf("hsv(%f, %f, %f)\n", hsv.hue, hsv.saturation, hsv.value);
+        // printf("hsv(%f, %f, %f)\n", hsv.hue(), hsv.saturation(), hsv.value());
         return hsv2rgb(hsv);
     };
 
-    auto const w = double(canvas.size.width);
-    auto const h = double(canvas.size.height);
+    auto const w = static_cast<double>(canvas.size.width);
+    auto const h = static_cast<double>(canvas.size.height);
+
+    auto const xExtent = xRange * 2;
+    auto const yExtent = yRange * 2;
 
     for (int y = 0; y < canvas.size.height; ++y)
     {
-        auto const yf = ((double(y) / h) - 0.5) * yRange;
+        auto const yf = ((static_cast<double>(y) / h) - 0.5) * yExtent;
         for (int x = 0; x < canvas.size.width; ++x)
         {
-            auto const xf = ((double(x) / w) - 0.5) * xRange;
+            auto const xf = ((static_cast<double>(x) / w) - 0.5) * xExtent;
             canvas.write(Point { x, y }, color(xf, yf));
         }
     }
@@ -229,7 +259,7 @@ int sixelWriter(char* data, int size, void* priv)
 template <typename F>
 void complex_plot(ImageSize imageSize, double xRange, double yRange, F f)
 {
-    auto canvas = Canvas(imageSize);
+    auto canvas = RGBCanvas(imageSize);
     paint_complex(canvas, xRange, yRange, move(f));
 
     sixel_output_t* output = nullptr;
@@ -245,8 +275,8 @@ void complex_plot(ImageSize imageSize, double xRange, double yRange, F f)
 int main(int argc, char const* argv[])
 {
     auto const canvasSize = ImageSize { 400, 400 };
-    auto const xRange = 8; // Ranges from minus N to plus N, inclusive.
-    auto const yRange = 8;
+    auto const xRange = 2; // Ranges from minus N to plus N, inclusive.
+    auto const yRange = 2;
 
     cout << "\t";
     complex_plot(canvasSize, xRange, yRange, [](auto z) { return z; });

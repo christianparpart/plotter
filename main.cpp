@@ -169,8 +169,7 @@ struct RGBCanvas
     }
 };
 
-template <typename F>
-void paint_complex(RGBCanvas& canvas, double xRange, double yRange, F f)
+RGBColor color(double x, double y)
 {
     auto const threshold = 0.1;
 
@@ -225,13 +224,16 @@ void paint_complex(RGBCanvas& canvas, double xRange, double yRange, F f)
         return angleRadians * (180.0 / M_PI);
     };
 
-    auto const color = [&](auto x, auto y) {
-        auto const hsv = HSVColor { angle(real_f(z(x, y)), imaginary_f(z(x, y))),
-                                    magnitude_shading(x, y),
-                                    gridlines(x, y) };
-        // printf("hsv(%f, %f, %f)\n", hsv.hue(), hsv.saturation(), hsv.value());
-        return hsv2rgb(hsv);
-    };
+    auto const hsv = HSVColor { angle(real_f(z(x, y)), imaginary_f(z(x, y))),
+                                magnitude_shading(x, y),
+                                gridlines(x, y) };
+    // printf("hsv(%f, %f, %f)\n", hsv.hue(), hsv.saturation(), hsv.value());
+    return hsv2rgb(hsv);
+}
+
+template <typename F, typename Colorizer>
+void paint_complex(RGBCanvas& canvas, double xRange, double yRange, F f, Colorizer color)
+{
 
     auto const w = static_cast<double>(canvas.size.width);
     auto const h = static_cast<double>(canvas.size.height);

@@ -8,10 +8,12 @@
 #include <sixel/sixel.h>
 
 using std::abs;
+using std::complex;
 using std::cout;
 using std::isinf;
 using std::isnan;
 using std::move;
+using std::string_view;
 using std::vector;
 
 using namespace std::complex_literals;
@@ -78,6 +80,7 @@ struct HSVColor
 
 constexpr RGBColor hsv2rgb(HSVColor hsv) noexcept
 {
+    // printf("hsv(%f, %f, %f)\n", hsv.hue(), hsv.saturation(), hsv.value());
     // Implementation from:
     // https://www.codegrepper.com/code-examples/cpp/c%2B%2B+hsl+to+rgb+integer
 
@@ -169,10 +172,9 @@ struct RGBCanvas
     }
 };
 
-RGBColor color(double x, double y)
+template <typename F>
+auto colorize(F f)
 {
-    auto const threshold = 0.1;
-
     // FYI: https://www.algorithm-archive.org/contents/domain_coloring/domain_coloring.html
     //
     // angle(x,y) := (pi + atan2(-y, -x)) / (2*pi)
@@ -192,25 +194,26 @@ RGBColor color(double x, double y)
     // imaginary_f(z) := imag(f(z))
     // real_f(z)      := real(f(z))
 
+    auto const threshold = 0.1;
+
     auto const r = [](auto x, auto y) {
         return sqrt(x * x + y * y);
     };
     auto const theta = [](auto x, auto y) {
         return atan2(y, x);
     };
-    auto const z = [&](auto x, auto y) {
+    auto const z = [=](auto x, auto y) {
         return r(x, y) * exp(theta(x, y) * 1i);
     };
-    auto const magnitude_shading = [&](auto x, auto y) {
+    auto const magnitude_shading = [=](auto x, auto y) {
         return 0.5 + 0.5 * (abs(f(z(x, y))) - floor(abs(f(z(x, y)))));
     };
-    auto const real_f = [&f](auto z) {
+    auto const real_f = [f](auto z) {
         return f(z).real();
     };
-    auto const imaginary_f = [&f](auto z) {
+    auto const imaginary_f = [f](auto z) {
         return f(z).imag();
     };
-
     auto const gridlines = [&](auto x, auto y) {
         auto const value = abs(pow(sin(real_f(z(x, y)) * M_PI), threshold))
                            * pow(abs(sin(imaginary_f(z(x, y)) * M_PI)), threshold);
@@ -218,23 +221,36 @@ RGBColor color(double x, double y)
             return 1.0;
         return value;
     };
-
     auto const angle = [](auto x, auto y) {
         auto const angleRadians = (M_PI + atan2(-y, -x)) / (2 * M_PI);
         return angleRadians * (180.0 / M_PI);
     };
 
-    auto const hsv = HSVColor { angle(real_f(z(x, y)), imaginary_f(z(x, y))),
-                                magnitude_shading(x, y),
-                                gridlines(x, y) };
-    // printf("hsv(%f, %f, %f)\n", hsv.hue(), hsv.saturation(), hsv.value());
-    return hsv2rgb(hsv);
+    return [=](double x, double y) -> RGBColor {
+        auto const hsv = HSVColor { angle(real_f(z(x, y)), imaginary_f(z(x, y))),
+                                    magnitude_shading(x, y),
+                                    gridlines(x, y) };
+        return hsv2rgb(hsv);
+    };
 }
 
-template <typename F, typename Colorizer>
-void paint_complex(RGBCanvas& canvas, double xRange, double yRange, F f, Colorizer color)
+template <typename F>
+auto colorize_simple(F f)
 {
+    // f: (z) |-> f(z)
+    return [=](double x, double y) -> RGBColor {
+        if (x == 0 && y == 0)
+            return RGBColor { 0, 0, 0 }; // black
+        auto const z = std::complex<double>(x, y);
+        auto const fz = f(z);
+        auto const h = (M_PI + atan2(-y, -x)) / (2 * M_PI) * (180.0 / M_PI);
+        return hsv2rgb(HSVColor { h, 1, 1 });
+    };
+}
 
+template <typename Colorizer>
+void paint_complex(RGBCanvas& canvas, double xRange, double yRange, Colorizer color)
+{
     auto const w = static_cast<double>(canvas.size.width);
     auto const h = static_cast<double>(canvas.size.height);
 
@@ -259,10 +275,11 @@ int sixelWriter(char* data, int size, void* priv)
 };
 
 template <typename F>
-void complex_plot(ImageSize imageSize, double xRange, double yRange, F f)
+void complex_plot(ImageSize imageSize, double xRange, double yRange, string_view s, F f)
 {
+    cout << '\t';
     auto canvas = RGBCanvas(imageSize);
-    paint_complex(canvas, xRange, yRange, move(f));
+    paint_complex(canvas, xRange, yRange, f);
 
     sixel_output_t* output = nullptr;
     sixel_output_new(&output, &sixelWriter, nullptr, nullptr);
@@ -272,20 +289,27 @@ void complex_plot(ImageSize imageSize, double xRange, double yRange, F f)
 
     sixel_dither_unref(dither);
     sixel_output_destroy(output);
+    cout << s << "\n\n";
+}
+
+complex<double> C(double n)
+{
+    return complex<double>(n, 0.0);
 }
 
 int main(int argc, char const* argv[])
 {
-    auto const canvasSize = ImageSize { 400, 400 };
-    auto const xRange = 2; // Ranges from minus N to plus N, inclusive.
-    auto const yRange = 2;
+    auto const plot = [&](auto s, auto cf) {
+        auto constexpr canvasSize = ImageSize { 400, 400 };
+        auto constexpr xRange = 3.0; // Ranges from minus N to plus N, inclusive.
+        auto constexpr yRange = 3.0;
+        complex_plot(canvasSize, xRange, yRange, s, cf);
+    };
 
-    cout << "\t";
-    complex_plot(canvasSize, xRange, yRange, [](auto z) { return z; });
-    cout << "f(z) := z\n\n\t";
-
-    complex_plot(canvasSize, xRange, yRange, [](auto z) { return z * z; });
-    cout << "f(z) := z*z\n";
+    plot("f(z) := z", colorize_simple([](auto z) { return z; }));
+    plot("f(z) := z", colorize([](auto z) { return z; }));
+    plot("f(z) := z*z", colorize([](auto z) { return z * z; }));
+    plot("f(z) := (z-1)/(z*z+z+1)", colorize([](auto z) { return (z - C(1)) / (z * z + z + C(1)); }));
 
     return EXIT_SUCCESS;
 }

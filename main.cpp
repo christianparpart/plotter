@@ -306,8 +306,8 @@ int main(int argc, char const* argv[])
         complex_plot(canvasSize, xRange, yRange, s, cf);
     };
 
-    plot("f(z) := z", colorize_simple([](auto z) { return z; }));
-    plot("f(z) := z", colorize([](auto z) { return z; }));
+    // plot("f(z) := z", colorize_simple([](auto z) { return z; }));
+    // plot("f(z) := z", colorize([](auto z) { return z; }));
     plot("f(z) := z*z", colorize([](auto z) { return z * z; }));
     plot("f(z) := (z-1)/(z*z+z+1)", colorize([](auto z) { return (z - C(1)) / (z * z + z + C(1)); }));
 

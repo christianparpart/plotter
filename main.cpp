@@ -1,6 +1,8 @@
 #include <algorithm>
+#include <cassert>
 #include <complex>
 #include <iostream>
+#include <memory>
 #include <vector>
 
 #include <sixel/sixel.h>
@@ -36,69 +38,83 @@ struct RGBColor
 
 struct HSVColor
 {
-    uint8_t hue;
-    uint8_t saturation;
-    uint8_t value;
+    double hue;
+    double saturation;
+    double value;
 
-    constexpr uint8_t& operator[](int i) noexcept { return *(&hue + i); }
+    constexpr double& operator[](int i) noexcept { return *(&hue + i); }
 };
 
 // {{{ hsv2rgb
-RGBColor hsv2rgb(HSVColor hsv)
+constexpr RGBColor hsv2rgb(HSVColor hsv) noexcept
 {
-    RGBColor rgb {};
-    unsigned char region, remainder, p, q, t;
+    assert(0.0 <= hsv.hue && hsv.hue <= 1.0);
+    assert(0.0 <= hsv.saturation && hsv.saturation <= 1.0);
+    assert(0.0 <= hsv.value && hsv.value <= 1.0);
+
+    double r = 0, g = 0, b = 0;
 
     if (hsv.saturation == 0)
     {
-        rgb.red = hsv.value;
-        rgb.green = hsv.value;
-        rgb.blue = hsv.value;
-        return rgb;
+        r = hsv.value;
+        g = hsv.value;
+        b = hsv.value;
     }
-
-    region = hsv.hue / 43;
-    remainder = (hsv.hue - (region * 43)) * 6;
-
-    p = (hsv.value * (255 - hsv.saturation)) >> 8;
-    q = (hsv.value * (255 - ((hsv.saturation * remainder) >> 8))) >> 8;
-    t = (hsv.value * (255 - ((hsv.saturation * (255 - remainder)) >> 8))) >> 8;
-
-    switch (region)
+    else
     {
-    case 0:
-        rgb.red = hsv.value;
-        rgb.green = t;
-        rgb.blue = p;
-        break;
-    case 1:
-        rgb.red = q;
-        rgb.green = hsv.value;
-        rgb.blue = p;
-        break;
-    case 2:
-        rgb.red = p;
-        rgb.green = hsv.value;
-        rgb.blue = t;
-        break;
-    case 3:
-        rgb.red = p;
-        rgb.green = q;
-        rgb.blue = hsv.value;
-        break;
-    case 4:
-        rgb.red = t;
-        rgb.green = p;
-        rgb.blue = hsv.value;
-        break;
-    default:
-        rgb.red = hsv.value;
-        rgb.green = p;
-        rgb.blue = q;
-        break;
+        if (hsv.hue == 360)
+            hsv.hue = 0;
+        else
+            hsv.hue = hsv.hue / 60;
+
+        auto const i = static_cast<int>(trunc(hsv.hue));
+        double const f = hsv.hue - i;
+        double const p = hsv.value * (1.0 - hsv.saturation);
+        double const q = hsv.value * (1.0 - (hsv.saturation * f));
+        double const t = hsv.value * (1.0 - (hsv.saturation * (1.0 - f)));
+
+        switch (i)
+        {
+        case 0:
+            r = hsv.value;
+            g = t;
+            b = p;
+            break;
+        case 1:
+            r = q;
+            g = hsv.value;
+            b = p;
+            break;
+        case 2:
+            r = p;
+            g = hsv.value;
+            b = t;
+            break;
+        case 3:
+            r = p;
+            g = q;
+            b = hsv.value;
+            break;
+        case 4:
+            r = t;
+            g = p;
+            b = hsv.value;
+            break;
+        default:
+            r = hsv.value;
+            g = p;
+            b = q;
+            break;
+        }
     }
 
-    return rgb;
+    // auto const v = RGBColor { static_cast<unsigned char>(r * 255.0),
+    //                   static_cast<unsigned char>(g * 255.0),
+    //                   static_cast<unsigned char>(b * 255.0) };
+    // printf("hsv2rgb: #%02x%02x%02x\n", v.red, v.green, v.blue);
+    return RGBColor { static_cast<unsigned char>(r * 255.0),
+                      static_cast<unsigned char>(g * 255.0),
+                      static_cast<unsigned char>(b * 255.0) };
 }
 // }}}
 
@@ -131,9 +147,6 @@ void paint_complex(Canvas& canvas, double xRange, double yRange, F f)
 {
     auto const threshold = 0.1;
 
-    auto const w = double(canvas.size.width);
-    auto const h = double(canvas.size.height);
-
     // FYI: https://www.algorithm-archive.org/contents/domain_coloring/domain_coloring.html
     //
     // angle(x,y) := (pi + atan2(-y, -x)) / (2*pi)
@@ -153,10 +166,6 @@ void paint_complex(Canvas& canvas, double xRange, double yRange, F f)
     // imaginary_f(z) := imag(f(z))
     // real_f(z)      := real(f(z))
 
-    auto const angle = [](auto x, auto y) {
-        return (M_PI + atan2(-y, -x)) / (2 * M_PI);
-    };
-
     auto const r = [](auto x, auto y) {
         return sqrt(x * x + y * y);
     };
@@ -166,11 +175,9 @@ void paint_complex(Canvas& canvas, double xRange, double yRange, F f)
     auto const z = [&](auto x, auto y) {
         return r(x, y) * exp(theta(x, y) * 1i);
     };
-
     auto const magnitude_shading = [&](auto x, auto y) {
         return 0.5 + 0.5 * (abs(f(z(x, y))) - floor(abs(f(z(x, y)))));
     };
-
     auto const real_f = [&f](auto z) {
         return f(z).real();
     };
@@ -179,25 +186,26 @@ void paint_complex(Canvas& canvas, double xRange, double yRange, F f)
     };
 
     auto const gridlines = [&](auto x, auto y) {
-        // clang-format off
-        return abs(pow(sin(real_f(z(x, y)) * M_PI), threshold))
-             * pow(abs(sin(imaginary_f(z(x, y)) * M_PI)), threshold);
-        // clang-format on
+        auto const value = abs(pow(sin(real_f(z(x, y)) * M_PI), threshold))
+                           * pow(abs(sin(imaginary_f(z(x, y)) * M_PI)), threshold);
+        if (isnan(abs(value)) || isinf(abs(value)))
+            return 1.0;
+        return value;
+    };
+
+    auto const angle = [](auto x, auto y) {
+        return (M_PI + atan2(-y, -x)) / (2 * M_PI);
     };
 
     auto const color = [&](auto x, auto y) {
-        // clang-format off
-        auto const hsv = HSVColor {
-            // (uint8_t) clamp(angle(real_f(z(x, y)), imaginary_f(z(x, y))) * 255.0, 0.0, 255.0),
-            // (uint8_t) clamp(magnitude_shading(x, y) * 255.0, 0.0, 255.0),
-            // (uint8_t) clamp(gridlines(x, y) * 255.0, 0.0, 255.0)
-            (uint8_t) clamp(angle(real_f(z(x, y)), imaginary_f(z(x, y))) * 255.0, 0.0, 255.0),
-            (uint8_t) clamp(magnitude_shading(x, y) * 255.0, 0.0, 255.0),
-            (uint8_t) clamp(gridlines(x, y) * 255.0, 0.0, 255.0)
-        };
+        auto const hsv = HSVColor { angle(real_f(z(x, y)), imaginary_f(z(x, y))),
+                                    magnitude_shading(x, y),
+                                    gridlines(x, y) };
         return hsv2rgb(hsv);
-        // clang-format on
     };
+
+    auto const w = double(canvas.size.width);
+    auto const h = double(canvas.size.height);
 
     for (int y = 0; y < canvas.size.height; ++y)
     {
@@ -220,28 +228,29 @@ template <typename F>
 void complex_plot(ImageSize imageSize, double xRange, double yRange, F f)
 {
     auto canvas = Canvas(imageSize);
-
     paint_complex(canvas, xRange, yRange, move(f));
 
     sixel_output_t* output = nullptr;
     sixel_output_new(&output, &sixelWriter, nullptr, nullptr);
-    sixel_output_set_encode_policy(output, SIXEL_ENCODEPOLICY_AUTO);
-
     sixel_dither_t* dither = sixel_dither_get(SIXEL_BUILTIN_XTERM256);
+
     sixel_encode(canvas.pixels.data(), imageSize.width, imageSize.height, 3, dither, output);
 
+    sixel_dither_unref(dither);
     sixel_output_destroy(output);
 }
 
 int main(int argc, char const* argv[])
 {
     auto const canvasSize = ImageSize { 400, 400 };
+    auto const xRange = 4.0; // Ranges from minus N to plus N, inclusive.
+    auto const yRange = 4.0;
 
     cout << "\t";
-    complex_plot(canvasSize, 4.0f, 4.0f, [](complex<double> z) { return z; });
+    complex_plot(canvasSize, xRange, yRange, [](auto z) { return z; });
     cout << "f(z) := z\n\n\t";
 
-    complex_plot(canvasSize, 4.0f, 4.0f, [](complex<double> z) { return z * z; });
+    complex_plot(canvasSize, xRange, yRange, [](auto z) { return z * z; });
     cout << "f(z) := z*z\n";
 
     return EXIT_SUCCESS;
